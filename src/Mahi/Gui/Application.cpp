@@ -6,9 +6,6 @@
 #include <Mahi/Util/Timing/Clock.hpp>
 #include <Mahi/Gui/Fonts.hpp>
 
-#define NANOVG_GL3_IMPLEMENTATION
-#include "nanovg_gl.h"
-#include "nanovg_gl_utils.h"
 #include "imgui_internal.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
@@ -78,7 +75,6 @@ util::Event<void(int, const std::string &)> Application::on_error;
 
 Application::Application(const Config &conf) :
     m_window(nullptr),
-    m_vg(nullptr),
     m_imgui_context(nullptr),
     m_implot_context(nullptr),
     m_conf(conf),
@@ -157,13 +153,6 @@ Application::Application(const Config &conf) :
     // enable MSAA and depth testing in OpenGL
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
-    // initialize NanoVG
-    if (conf.nvg_aa)
-        m_vg = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-    else
-        m_vg = nvgCreateGL3(NVG_STENCIL_STROKES);  // | NVG_DEBUG
-    if (m_vg == NULL)
-        throw std::runtime_error("Failed to create NanoVG context!");
     // configure ImGui
     m_imgui_context = configureImGui(m_window, xscale);
     if (!m_imgui_context)
@@ -175,13 +164,13 @@ Application::Application(const Config &conf) :
 }
 
 Application::Application() :
-    Application(Config({"", 100, 100, 0, false, true, false, true, false, false, 4, true, true, true, true, Grays::Black})) {}
+    Application(Config({"", 100, 100, 0, false, true, false, true, false, false, 4, true, true, true, Grays::Black})) {}
 
 Application::Application(const std::string &title, int monitor) :
-    Application(Config({title, 0, 0, monitor, true, false, true, true, false, false, 4, true, true, true, true, Grays::Black})) {}
+    Application(Config({title, 0, 0, monitor, true, false, true, true, false, false, 4, true, true, true, Grays::Black})) {}
 
 Application::Application(int width, int height, const std::string &title, bool resizable, int monitor) :
-    Application(Config({title, width, height, monitor, false, resizable, true, true, false, true, 4, true, true, true, true, Grays::Black})) {}
+    Application(Config({title, width, height, monitor, false, resizable, true, true, false, true, 4, true, true, true, Grays::Black})) {}
 
 Application::~Application() {
     ImGui_ImplOpenGL3_Shutdown();
@@ -193,10 +182,6 @@ Application::~Application() {
     if (m_imgui_context) {
         ImGui::DestroyContext(m_imgui_context);
         m_imgui_context = nullptr;
-    }
-    if (m_vg) {
-        nvgDeleteGL3(m_vg);
-        m_vg = nullptr;
     }
     if (m_window) {
         glfwDestroyWindow(m_window);
@@ -260,17 +245,7 @@ void Application::run() {
         prof_clk.restart();
         draw();
         prof.t_gl = prof_clk.restart();
-
-        // Render NanoVG
-
-        int winWidth, winHeight;
-        glfwGetWindowSize(m_window, &winWidth, &winHeight);
-        float pxRatio = static_cast<float>(fbWidth) / static_cast<float>(winWidth);
-        nvgBeginFrame(m_vg, static_cast<float>(winWidth), static_cast<float>(winHeight), pxRatio);
-        draw(m_vg);
-        nvgEndFrame(m_vg);
-        prof.t_nvg = prof_clk.restart();
-
+        
         // Render ImGui
 
         ImGui::Render();

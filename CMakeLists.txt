@@ -105,15 +105,6 @@ set(IMPLOT_HEADERS 3rdparty/implot/implot.h 3rdparty/implot/implot_internal.h)
 set(IMPLOT_SRC     3rdparty/implot/implot.cpp 3rdparty/implot/implot_items.cpp 3rdparty/implot/implot_demo.cpp)
 set(IMPLOT_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/implot)
 
-# NANOVG
-add_subdirectory(3rdparty/nanovg)
-install(TARGETS nanovg EXPORT mahi-gui-targets
-	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-	ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
-
-# NANOSVG
-set(NANOSVG_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/nanosvg/src)
 
 # CLIPPER
 add_subdirectory(3rdparty/clipper)
@@ -166,7 +157,6 @@ target_include_directories(gui
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${IMGUI_INCLUDE_DIR}>
         $<BUILD_INTERFACE:${IMPLOT_INCLUDE_DIR}>
-        $<BUILD_INTERFACE:${NANOSVG_INCLUDE_DIR}>
 	PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -175,7 +165,6 @@ target_include_directories(gui
 target_link_libraries(gui PUBLIC mahi::util)
 target_link_libraries(gui PUBLIC glfw)
 target_link_libraries(gui PUBLIC glad)
-target_link_libraries(gui PUBLIC nanovg)
 target_link_libraries(gui PUBLIC clipper)
 if(MAHI_GUI_NATIVE_DIAGS)
 	target_link_libraries(gui PUBLIC nfd)
@@ -214,8 +203,6 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY 3rdparty/glad/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES ${IMGUI_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES ${IMPLOT_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES 3rdparty/nanovg/src/nanovg.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES 3rdparty/nanosvg/src/nanosvg.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES 3rdparty/clipper/clipper.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # set where we want to install our config

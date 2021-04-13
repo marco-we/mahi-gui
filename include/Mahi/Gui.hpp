@@ -17,7 +17,5 @@
 #include <Mahi/Gui/Tween.hpp>
 #include <Mahi/Gui/Fonts.hpp>
 #include <Mahi/Gui/imgui_custom.hpp>
-#include <Mahi/Gui/nanovg_custom.hpp>
-#include <nanovg_gl_utils.h>
 #include <imgui_stdlib.h>
 #include <implot.h>

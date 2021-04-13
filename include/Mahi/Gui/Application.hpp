@@ -18,7 +18,6 @@
 #include <memory>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <nanovg.h>
 #include <Mahi/Gui/Color.hpp>
 #include <Mahi/Gui/Vec2.hpp>
 #include <Mahi/Util/Event.hpp>
@@ -51,7 +50,6 @@ public:
         bool transparent       = false;      ///< should the window area be transparent?
         bool center            = true;       ///< should the window be centered to the monitor?
         int  msaa              = 4;          ///< multisample anti-aliasing level (0 = none, 2, 4, 8, etc.)
-        bool nvg_aa            = true;       ///< should NanoVG use anti-aliasing?
         bool vsync             = true;       ///< should VSync be enabled?
         bool dpi_aware         = false;      ///< does the application scale for high DPI? (WIP, DO NOT USE!!!)
         bool gl_forward_compat = true;       ///< should GLFW_OPENGL_FORWARD_COMPAT be set? Always set on Mac.
@@ -150,7 +148,6 @@ public:
         util::Time t_update;      ///< time elapsed across update()
         util::Time t_coroutines;  ///< time elapsed across all coroutines
         util::Time t_gl;          ///< time elapsed rendering raw OpenGL (i.e. inside of draw())
-        util::Time t_nvg;      ///< time elapsed rendering NanoVG (i.e. inside of draw(NVGcontext*))
         util::Time t_imgui;    ///< time elapsed rendering ImGui
         util::Time t_idle;     ///< time elapsed idling
         util::Time t_buffers;  ///< time elapsed swapping OpenGL buffers
@@ -164,8 +161,6 @@ protected:
     virtual void update() { /* nothing by default */ }
     /// Generic OpenGL drawing context, called immediately after update().
     virtual void draw() { /* nothing by default */ }
-    /// NanoVG specific drawing context, called immediately after draw()
-    virtual void draw(NVGcontext* nvg) { /* nothing by default */ }
 
 public:
     /// Emitted when the Window moves. Passes (x,y) window position pixels.
@@ -186,9 +181,7 @@ public:
 protected:
     /// Internal GLFW window handle, you can use glfwXXX functions with this
     GLFWwindow* m_window;
-    /// Internal NVG Context, you can use use nvgXXX functions with this
-    NVGcontext* m_vg;
-
+    
 private:
     ImGuiContext*  m_imgui_context;  ///< ImGui context of this application
     ImPlotContext* m_implot_context; ///< ImPlot context of this application

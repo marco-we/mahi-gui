@@ -17,13 +17,20 @@
 #pragma once
 
 #include <string>
-#include <nanovg.h>
 
 namespace mahi {
 namespace gui {
 
 /// Alias for NVGColor, a float RGBA representation
-typedef NVGcolor Color;
+
+struct Color {
+    union {
+        float rgba[4];
+        struct {
+            float r, g, b, a;
+        };
+    };
+};
 
 /// HSV Color POD type representation
 struct HSV {

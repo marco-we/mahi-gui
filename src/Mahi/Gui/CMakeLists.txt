@@ -6,7 +6,6 @@ target_sources(gui
     Transform.cpp
     Transformable.cpp
     imgui_custom.cpp
-    nanovg_custom.cpp
 )
 
 if(MAHI_GUI_NATIVE_DIAGS)
