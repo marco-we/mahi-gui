@@ -7,8 +7,8 @@
 #include <Mahi/Gui/Fonts.hpp>
 
 #include "imgui_internal.h"
+#include "backends/imgui_impl_dx11.h"
 #include "backends/imgui_impl_glfw.h"
-#include "backends/imgui_impl_opengl3.h"
 #include "implot.h"
 #include <stdexcept>
 
@@ -25,7 +25,87 @@ using std::memcpy;
 #include <ShellScalingAPI.h>
 #endif
 
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+
 using namespace mahi::util;
+
+///////////////////////////////////////////////////////////////////////////////
+
+#include <d3d11.h>
+
+#pragma comment(lib, "d3d11.lib")
+
+ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
+static ID3D11Device *          g_pd3dDevice           = NULL;
+static ID3D11DeviceContext *   g_pd3dDeviceContext    = NULL;
+static IDXGISwapChain *        g_pSwapChain           = NULL;
+static ID3D11RenderTargetView *g_mainRenderTargetView = NULL;
+
+void CreateRenderTarget() {
+    ID3D11Texture2D *pBackBuffer;
+    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
+    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, NULL, &g_mainRenderTargetView);
+    pBackBuffer->Release();
+}
+
+void CleanupRenderTarget() {
+    if (g_mainRenderTargetView) {
+        g_mainRenderTargetView->Release();
+        g_mainRenderTargetView = NULL;
+    }
+}
+
+bool CreateDeviceD3D(HWND hWnd) {
+    // Setup swap chain
+    DXGI_SWAP_CHAIN_DESC sd;
+    ZeroMemory(&sd, sizeof(sd));
+    sd.BufferCount                        = 2;
+    sd.BufferDesc.Width                   = 0;
+    sd.BufferDesc.Height                  = 0;
+    sd.BufferDesc.Format                  = DXGI_FORMAT_R8G8B8A8_UNORM;
+    sd.BufferDesc.RefreshRate.Numerator   = 60;
+    sd.BufferDesc.RefreshRate.Denominator = 1;
+    sd.Flags                              = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    sd.BufferUsage                        = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    sd.OutputWindow                       = hWnd;
+    sd.SampleDesc.Count                   = 1;
+    sd.SampleDesc.Quality                 = 0;
+    sd.Windowed                           = TRUE;
+    sd.SwapEffect                         = DXGI_SWAP_EFFECT_DISCARD;
+
+    UINT createDeviceFlags = 0;
+    // createDeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
+    D3D_FEATURE_LEVEL       featureLevel;
+    const D3D_FEATURE_LEVEL featureLevelArray[2] = {
+        D3D_FEATURE_LEVEL_11_0,
+        D3D_FEATURE_LEVEL_10_0,
+    };
+    if (D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, createDeviceFlags,
+                                      featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain,
+                                      &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext) != S_OK)
+        return false;
+
+    CreateRenderTarget();
+    return true;
+}
+
+void CleanupDeviceD3D() {
+    CleanupRenderTarget();
+    if (g_pSwapChain) {
+        g_pSwapChain->Release();
+        g_pSwapChain = NULL;
+    }
+    if (g_pd3dDeviceContext) {
+        g_pd3dDeviceContext->Release();
+        g_pd3dDeviceContext = NULL;
+    }
+    if (g_pd3dDevice) {
+        g_pd3dDevice->Release();
+        g_pd3dDevice = NULL;
+    }
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // FORWARDS
@@ -36,7 +116,6 @@ namespace gui {
 
 namespace {
 // GLFW
-static void glfw_context_version(bool gl_forward_compat);
 static void glfw_setup_window_callbacks(GLFWwindow *window, void *userPointer);
 static void glfw_error_callback(int error, const char *description);
 static void glfw_pos_callback(GLFWwindow *window, int xpos, int ypos);
@@ -45,7 +124,7 @@ static void glfw_close_callback(GLFWwindow *window);
 static void glfw_key_callback(GLFWwindow *, int key, int scancode, int action, int mods);
 static void glfw_drop_callback(GLFWwindow *window, int count, const char **paths);
 // IMGUI
-static ImGuiContext* configureImGui(GLFWwindow *window, float dpi_scale);
+static ImGuiContext *configureImGui(GLFWwindow *window, float dpi_scale);
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -53,18 +132,18 @@ static ImGuiContext* configureImGui(GLFWwindow *window, float dpi_scale);
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifdef _WIN32
-    void enable_dpi_aware() {
-        SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-        // const POINT ptZero = { 0, 0 };
-        // auto monitor = MonitorFromPoint(ptZero, MONITOR_DEFAULTTOPRIMARY);
-        // UINT dpiX, dpiY;
-        // auto result  = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
-        // return (float)dpiX / (float)USER_DEFAULT_SCREEN_DPI;
-    }
+void enable_dpi_aware() {
+    SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+    // const POINT ptZero = { 0, 0 };
+    // auto monitor = MonitorFromPoint(ptZero, MONITOR_DEFAULTTOPRIMARY);
+    // UINT dpiX, dpiY;
+    // auto result  = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+    // return (float)dpiX / (float)USER_DEFAULT_SCREEN_DPI;
+}
 #else
-    void enable_dpi_aware() {
-        // return 1.0f;
-    }
+void enable_dpi_aware() {
+    // return 1.0f;
+}
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -81,29 +160,29 @@ Application::Application(const Config &conf) :
     m_frame_time(Time::Zero),
     m_dt(Time::Zero),
     m_time(Time::Zero),
-    m_time_scale(1)
-{
-    // enable DPI awareness 
+    m_time_scale(1) {
+    // enable DPI awareness
     if (m_conf.dpi_aware)
         enable_dpi_aware();
     float xscale, yscale;
 
-    const char* err_msg;
-    // setup GLFW error callback
+    const char *err_msg;
     glfwSetErrorCallback(glfw_error_callback);
+
     // initialize GLFW
     if (!glfwInit()) {
         glfwGetError(&err_msg);
         throw std::runtime_error(err_msg);
     }
-    // setup GLFW context version
-    glfw_context_version(conf.gl_forward_compat);
+
     // GLFW window hints
     glfwWindowHint(GLFW_RESIZABLE, conf.resizable);
     glfwWindowHint(GLFW_VISIBLE, conf.visible);
     glfwWindowHint(GLFW_DECORATED, conf.decorated);
     glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, conf.transparent);
     glfwWindowHint(GLFW_SAMPLES, conf.msaa);
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
     // create GLFW window
     if (conf.fullscreen) {
         GLFWmonitor *monitor = nullptr;
@@ -126,20 +205,26 @@ Application::Application(const Config &conf) :
         glfwWindowHint(GLFW_GREEN_BITS, mode->greenBits);
         glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
         glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
-        glfwGetMonitorContentScale(monitor,&xscale,&yscale);
+        glfwGetMonitorContentScale(monitor, &xscale, &yscale);
         // glfwWindowHint(GLFW_AUTO_ICONIFY, false);
-        m_window = glfwCreateWindow((int)(mode->width), (int)(mode->height), conf.title.c_str(), monitor, NULL);
-    } 
-    else {
-        glfwGetMonitorContentScale(glfwGetPrimaryMonitor(),&xscale,&yscale);
-        m_window = glfwCreateWindow((int)(conf.width * xscale), (int)(conf.height *yscale), conf.title.c_str(), NULL, NULL);
+        m_window = glfwCreateWindow((int)(mode->width), (int)(mode->height), conf.title.c_str(),
+                                    monitor, NULL);
+    } else {
+        glfwGetMonitorContentScale(glfwGetPrimaryMonitor(), &xscale, &yscale);
+        m_window = glfwCreateWindow((int)(conf.width * xscale), (int)(conf.height * yscale),
+                                    conf.title.c_str(), NULL, NULL);
     }
     if (m_window == NULL) {
         glfwGetError(&err_msg);
         throw std::runtime_error(err_msg);
     }
-    // Make OpenGL context current
-    glfwMakeContextCurrent(m_window);
+
+    HWND hWnd = glfwGetWin32Window(m_window);
+    CreateDeviceD3D(hWnd);
+
+    ::ShowWindow(hWnd, SW_SHOWDEFAULT);
+    ::UpdateWindow(hWnd);
+    
     // Enabel VSync
     set_vsync(conf.vsync);
     // center window
@@ -147,12 +232,6 @@ Application::Application(const Config &conf) :
         center_window(conf.monitor);
     // Setup GLFW callbacks
     glfw_setup_window_callbacks(m_window, this);
-    // Initialize OpenGL loader
-    if (gladLoadGLLoader((GLADloadproc)glfwGetProcAddress) == 0)
-        throw std::runtime_error("Failed to initialize GLAD OpenGL loader!");
-    // enable MSAA and depth testing in OpenGL
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_MULTISAMPLE);
     // configure ImGui
     m_imgui_context = configureImGui(m_window, xscale);
     if (!m_imgui_context)
@@ -161,19 +240,28 @@ Application::Application(const Config &conf) :
     if (!m_implot_context)
         throw std::runtime_error("Failed to create ImPlot context!");
     ImPlot::SetColormap(ImPlotColormap_Deep);
+
+    ImGui_ImplGlfw_InitForVulkan(m_window, true);
+    ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+
+    on_window_resized.connect(this, &Application::handle_resize);
 }
 
 Application::Application() :
-    Application(Config({"", 100, 100, 0, false, true, false, true, false, false, 4, true, true, true, Grays::Black})) {}
+    Application(Config({"", 100, 100, 0, false, true, false, true, false, false, 4, true, true,
+                        true, Grays::Black})) {}
 
 Application::Application(const std::string &title, int monitor) :
-    Application(Config({title, 0, 0, monitor, true, false, true, true, false, false, 4, true, true, true, Grays::Black})) {}
+    Application(Config({title, 0, 0, monitor, true, false, true, true, false, false, 4, true, true,
+                        true, Grays::Black})) {}
 
-Application::Application(int width, int height, const std::string &title, bool resizable, int monitor) :
-    Application(Config({title, width, height, monitor, false, resizable, true, true, false, true, 4, true, true, true, Grays::Black})) {}
+Application::Application(int width, int height, const std::string &title, bool resizable,
+                         int monitor) :
+    Application(Config({title, width, height, monitor, false, resizable, true, true, false, true, 4,
+                        true, true, true, Grays::Black})) {}
 
 Application::~Application() {
-    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplDX11_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     if (m_implot_context) {
         ImPlot::DestroyContext(m_implot_context);
@@ -190,6 +278,9 @@ Application::~Application() {
     glfwTerminate();
 }
 
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam,
+                                                             LPARAM lParam);
+
 void Application::run() {
     ImGui::SetCurrentContext(m_imgui_context);
     ImGuiIO &   io = ImGui::GetIO();
@@ -202,7 +293,7 @@ void Application::run() {
         prof.t_poll = prof_clk.restart();
 
         // Start the Dear ImGui frame
-        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplDX11_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
@@ -226,30 +317,19 @@ void Application::run() {
         prof.t_coroutines = prof_clk.restart();
 #endif
 
-        // Clear frame, setup rendering
-        int fbWidth, fbHeight;
-        glfwGetFramebufferSize(m_window, &fbWidth, &fbHeight);
-        glViewport(0, 0, fbWidth, fbHeight);
-        if (!m_conf.transparent)
-            glClearColor(m_conf.background.r, m_conf.background.g, m_conf.background.b,
-                         m_conf.background.a);
-        else {
-            if (m_conf.background.a != 1)  // user wants a transparent fill
-                glClearColor(m_conf.background.r, m_conf.background.g, m_conf.background.b,
-                             m_conf.background.a);
-        }
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        /// Render OpenGL
+        /// Set D3D11 context
+        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, NULL);
+        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, (float *)&clear_color);
 
         prof_clk.restart();
         draw();
         prof.t_gl = prof_clk.restart();
-        
+
         // Render ImGui
 
         ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             GLFWwindow *backup_current_context = glfwGetCurrentContext();
             ImGui::UpdatePlatformWindows();
@@ -266,9 +346,8 @@ void Application::run() {
         }
         prof.t_idle = prof_clk.restart();
 
-        // Swap OpenGL Buffers
-
-        glfwSwapBuffers(m_window);
+        // Swap buffers
+        g_pSwapChain->Present(m_conf.vsync ? 1 : 0, 0);  // Present with vsync
         prof.t_buffers = prof_clk.restart();
 
         // Set Profile
@@ -369,20 +448,14 @@ float Application::get_pixel_ratio() const {
     return get_framebuffer_size().x / get_window_size().x;
 }
 
-float Application::get_dpi_scale() const {    
-    auto monitor = glfwGetPrimaryMonitor();
+float Application::get_dpi_scale() const {
+    auto  monitor = glfwGetPrimaryMonitor();
     float xscale = 1, yscale = 1;
     glfwGetMonitorContentScale(monitor, &xscale, &yscale);
     return xscale;
 }
 
-void Application::set_vsync(bool enabled) {
-    m_conf.vsync = enabled;
-    if (m_conf.vsync)
-        glfwSwapInterval(1);  // Enable vsync
-    else
-        glfwSwapInterval(0);  // Disable vsync
-}
+void Application::set_vsync(bool enabled) { m_conf.vsync = enabled; }
 
 void Application::set_frame_limit(util::Frequency freq) {
     set_vsync(false);
@@ -395,9 +468,7 @@ Vec2 Application::get_mouse_pos() const {
     return {(float)x, (float)y};
 }
 
-const Application::Config& Application::get_config() const {
-    return m_conf;
-}
+const Application::Config &Application::get_config() const { return m_conf; }
 
 #ifdef MAHI_COROUTINES
 
@@ -429,30 +500,19 @@ std::shared_ptr<YieldTimeScaled> Application::yield_time_scaled(util::Time durat
 
 const Application::Profile &Application::profile() const { return m_profile; }
 
+void Application::handle_resize(int w, int h)
+{
+    CleanupRenderTarget();
+    g_pSwapChain->ResizeBuffers(0, (UINT)(w), (UINT)(h), DXGI_FORMAT_UNKNOWN,
+                                0);
+    CreateRenderTarget();
+}
+
 namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 // GLFW
 ///////////////////////////////////////////////////////////////////////////////
-
-static void glfw_context_version(bool gl_forward_compat) {
-    // Decide GL+GLSL versions
-#if __APPLE__
-    // GL 3.2 + GLSL 150
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
-#else
-    // GL 3.0 + GLSL 130
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
-    if (gl_forward_compat) {
-        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);           // 3.0+ only
-    }
-#endif
-}
 
 void glfw_setup_window_callbacks(GLFWwindow *window, void *userPointer) {
     glfwSetWindowUserPointer(window, userPointer);
@@ -502,11 +562,11 @@ static void glfw_drop_callback(GLFWwindow *window, int count, const char **paths
 ///////////////////////////////////////////////////////////////////////////////
 // IMGUI
 ///////////////////////////////////////////////////////////////////////////////
-static ImGuiContext* configureImGui(GLFWwindow *window, float dpi_scale) {
+static ImGuiContext *configureImGui(GLFWwindow *window, float dpi_scale) {
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
-    auto context = ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
+    auto     context = ImGui::CreateContext();
+    ImGuiIO &io      = ImGui::GetIO();
     (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Enable Keyboard Controls
     // io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
@@ -527,7 +587,8 @@ static ImGuiContext* configureImGui(GLFWwindow *window, float dpi_scale) {
     font_cfg.OversampleV          = 1;
     font_cfg.FontDataOwnedByAtlas = false;
     strcpy(font_cfg.Name, "Roboto Mono Bold");
-    io.Fonts->AddFontFromMemoryTTF(RobotoMono_Bold_ttf, RobotoMono_Bold_ttf_len, IM_ROUND(15.0f * dpi_scale), &font_cfg);
+    io.Fonts->AddFontFromMemoryTTF(RobotoMono_Bold_ttf, RobotoMono_Bold_ttf_len,
+                                   IM_ROUND(15.0f * dpi_scale), &font_cfg);
 
     ImFontConfig icons_config;
     icons_config.MergeMode            = true;
@@ -540,13 +601,13 @@ static ImGuiContext* configureImGui(GLFWwindow *window, float dpi_scale) {
 
     // merge in icons from font awesome 5
     static const ImWchar fa_ranges[] = {ICON_MIN_FA, ICON_MAX_FA, 0};
-    io.Fonts->AddFontFromMemoryTTF(fa_solid_900_ttf, fa_solid_900_ttf_len, IM_ROUND(14.0f * dpi_scale), &icons_config,
-                                   fa_ranges);
+    io.Fonts->AddFontFromMemoryTTF(fa_solid_900_ttf, fa_solid_900_ttf_len,
+                                   IM_ROUND(14.0f * dpi_scale), &icons_config, fa_ranges);
 
     // merge in icons from font awesome 5 brands
     static const ImWchar fab_ranges[] = {ICON_MIN_FAB, ICON_MAX_FAB, 0};
-    io.Fonts->AddFontFromMemoryTTF(fa_brands_400_ttf, fa_brands_400_ttf_len, IM_ROUND(14.0f * dpi_scale), &icons_config,
-                                   fab_ranges);
+    io.Fonts->AddFontFromMemoryTTF(fa_brands_400_ttf, fa_brands_400_ttf_len,
+                                   IM_ROUND(14.0f * dpi_scale), &icons_config, fab_ranges);
 
     ImGui::StyleColorsMahiDark4();
     ImGuiStyle &style = ImGui::GetStyle();
@@ -576,28 +637,11 @@ static ImGuiContext* configureImGui(GLFWwindow *window, float dpi_scale) {
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
 
-
     // DPI scaling method 1 (this worked for my previous project, but not this...):
-    io.FontGlobalScale = 1.0f / dpi_scale;
-    io.DisplayFramebufferScale = ImVec2(dpi_scale,dpi_scale);
+    io.FontGlobalScale         = 1.0f / dpi_scale;
+    io.DisplayFramebufferScale = ImVec2(dpi_scale, dpi_scale);
     // DPI scaling method 2:
     // style.ScaleAllSizes(dpi_scale);
-
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-
-    // Decide GL+GLSL versions
-#if __APPLE__
-    // GL 3.2 + GLSL 150
-    const char *glsl_version = "#version 150";
-#else
-    // GL 3.0 + GLSL 130
-    const char *glsl_version = "#version 130";
-#endif
-    ImGui_ImplOpenGL3_Init(glsl_version);
-
-    // // create device objects and set font  (Evan added this so it may break things)
-    // ImGui_ImplOpenGL3_CreateDeviceObjects();
-    // ImGui::SetCurrentFont(ImGui::GetDefaultFont());
 
     return context;
 }

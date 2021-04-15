@@ -1830,6 +1830,8 @@ struct ImGuiIO
     void        (*SetClipboardTextFn)(void* user_data, const char* text);
     void*       ClipboardUserData;
 
+    void* ImeWindowHandle;  // = NULL           // (Windows) Set this to your HWND to get automatic IME cursor positioning.
+
     //------------------------------------------------------------------
     // Input - Fill before calling NewFrame()
     //------------------------------------------------------------------

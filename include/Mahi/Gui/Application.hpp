@@ -181,6 +181,8 @@ public:
 protected:
     /// Internal GLFW window handle, you can use glfwXXX functions with this
     GLFWwindow* m_window;
+
+    void handle_resize(int w, int h);
     
 private:
     ImGuiContext*  m_imgui_context;  ///< ImGui context of this application
